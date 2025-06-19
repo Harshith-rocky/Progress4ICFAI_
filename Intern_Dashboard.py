@@ -613,7 +613,7 @@ def fetch_readme_status(users, name_to_username):
         st.write(f"📊 README Check: {len(valid_users)} users have valid usernames out of {len(users)} total")
     
     # Process valid users
-    with ThreadPoolExecutor(max_workers=6) as executor:  # Reduced workers to avoid rate limiting
+    with ThreadPoolExecutor(max_workers=10) as executor:  # Reduced workers to avoid rate limiting
         futures = {}
         for user, username in valid_users:
             futures[executor.submit(check_readme_exists_api, username)] = (user, username)
@@ -919,7 +919,7 @@ def main():
         status_text = st.empty()
         
         # Limit the number of projects to analyze to avoid timeout
-        max_projects = min(len(projects), 150)  # Limit to 50 most recent projects
+        max_projects = min(len(projects), 500)  # Limit to 50 most recent projects
         projects_to_analyze = projects[:max_projects]
         
         if len(projects) > max_projects:
@@ -957,7 +957,7 @@ def main():
                 status_text.text(f"Processing project {i + 1}/{len(projects_to_analyze)}: {project_name}")
         else:
             # Parallel processing for speed
-            with ThreadPoolExecutor(max_workers=6) as executor:
+            with ThreadPoolExecutor(max_workers=10) as executor:
                 project_args = [(project, i) for i, project in enumerate(projects_to_analyze)]
                 futures = {executor.submit(process_project_wrapper, args): args for args in project_args}
                 
