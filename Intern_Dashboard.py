@@ -14,6 +14,7 @@ from urllib.parse import quote
 import json
 import os
 import pytz
+import hashlib
 from utils.validate_gitlab_token import validate_gitlab_token
 
 # Timezone configuration for IST
@@ -22,6 +23,12 @@ LOCAL_TIMEZONE = pytz.timezone('Asia/Kolkata')  # IST - Indian Standard Time
 # Configuration
 GITLAB_URL = "https://code.swecha.org"
 
+# Authentication Configuration
+DEFAULT_USERNAME = "intern_user"
+DEFAULT_PASSWORD = "intern2024"
+DEFAULT_ADMIN_USERNAME = "admin_user"
+DEFAULT_ADMIN_PASSWORD = "admin2024"
+
 # Enhanced styling
 st.set_page_config(
     page_title="GitLab Analytics Dashboard",
@@ -29,6 +36,401 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Authentication Functions
+def hash_password(password):
+    """Hash password using SHA256"""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def validate_user_credentials(username, password):
+    """Validate user credentials"""
+    return (username == DEFAULT_USERNAME and 
+            hash_password(password) == hash_password(DEFAULT_PASSWORD))
+
+def validate_admin_credentials(username, password):
+    """Validate admin credentials"""
+    return (username == DEFAULT_ADMIN_USERNAME and 
+            hash_password(password) == hash_password(DEFAULT_ADMIN_PASSWORD))
+
+# User Management Functions
+def load_users():
+    """Load users from JSON file"""
+    users_file = "users.json"
+    if os.path.exists(users_file):
+        try:
+            with open(users_file, 'r') as f:
+                return json.load(f)
+        except:
+            pass
+    # Default users if file doesn't exist
+    return {
+        DEFAULT_USERNAME: {
+            "password_hash": hash_password(DEFAULT_PASSWORD),
+            "access_token": "",
+            "created_at": datetime.now().isoformat(),
+            "is_active": True
+        }
+    }
+
+def save_users(users):
+    """Save users to JSON file"""
+    users_file = "users.json"
+    try:
+        with open(users_file, 'w') as f:
+            json.dump(users, f, indent=2)
+        return True
+    except Exception as e:
+        st.error(f"Error saving users: {e}")
+        return False
+
+def validate_user_credentials_dynamic(username, password):
+    """Validate user credentials dynamically from stored users"""
+    users = load_users()
+    if username in users:
+        user = users[username]
+        if user.get("is_active", True):
+            return hash_password(password) == user["password_hash"]
+    return False
+
+def get_user_token(username):
+    """Get user's access token"""
+    users = load_users()
+    if username in users:
+        return users[username].get("access_token", "")
+    return ""
+
+def show_authentication_screen():
+    """Show authentication screen before dashboard access"""
+    st.markdown("""
+    <style>
+        .auth-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 3rem;
+            border-radius: 20px;
+            color: white;
+            text-align: center;
+            margin-bottom: 2rem;
+            box-shadow: 0 10px 40px rgba(102, 126, 234, 0.3);
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Header
+    st.markdown("""
+    <div class="auth-header">
+        <h1>🔐 Authentication Required</h1>
+        <p>GitLab Analytics Dashboard - Secure Access</p>
+        <p style="font-size: 0.9em; opacity: 0.8;">Please authenticate to access the dashboard</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Authentication tabs
+    tab1, tab2 = st.tabs(["👤 Faculty Login", "🔐 Admin Login"])
+    
+    with tab1:
+        st.markdown("### 👤 User Authentication")
+        st.info("Login with your assigned username, password, and access token for standard dashboard access.")
+        
+        with st.form("user_login_form"):
+            username = st.text_input("Username", placeholder="Enter your username")
+            password = st.text_input("Password", type="password", placeholder="Enter your password")
+            user_token = st.text_input(
+                "GitLab Access Token",
+                type="password",
+                placeholder="glpat-xxxxxxxxxxxxxxxxxxxx",
+                help="Enter your assigned GitLab access token"
+            )
+            
+            user_login_submitted = st.form_submit_button("🚀 Login as Faculty", use_container_width=True)
+        
+        if user_login_submitted and username and password and user_token:
+            if validate_user_credentials_dynamic(username, password):
+                with st.spinner("🔍 Validating your access token..."):
+                    validation_result = validate_gitlab_token(user_token)
+                    
+                    if validation_result["success"]:
+                        # Save the token for this user
+                        users = load_users()
+                        users[username]["access_token"] = user_token
+                        save_users(users)
+                        
+                        st.session_state.authenticated = True
+                        st.session_state.user_type = "user"
+                        st.session_state.auth_user_info = {"username": username, "access_level": "user"}
+                        st.session_state.gitlab_token = user_token  # Set user's token
+                        st.session_state.token_validated = True
+                        st.success("✅ User Authentication Successful! Loading dashboard...")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Token Validation Failed: {validation_result.get('error', 'Invalid token')}")
+            else:
+                st.error("❌ Authentication Failed - Invalid username or password.")
+        elif user_login_submitted:
+            st.error("❌ Please fill in all fields (username, password, and access token).")
+    
+    with tab2:
+        st.markdown("### 🔐 Administrator Authentication")
+        st.info("Login with your admin credentials and GitLab access token for full administrative access.")
+        
+        with st.form("admin_login_form"):
+            admin_username = st.text_input("Admin Username", placeholder="Enter admin username")
+            admin_password = st.text_input("Admin Password", type="password", placeholder="Enter admin password")
+            admin_token = st.text_input(
+                "GitLab Access Token",
+                type="password",
+                placeholder="glpat-xxxxxxxxxxxxxxxxxxxx",
+                help="Enter your GitLab personal access token"
+            )
+            
+            admin_login_submitted = st.form_submit_button("🔓 Login as Admin", use_container_width=True)
+        
+        if admin_login_submitted and admin_username and admin_password and admin_token:
+            if validate_admin_credentials(admin_username, admin_password):
+                with st.spinner("🔍 Validating GitLab token..."):
+                    validation_result = validate_gitlab_token(admin_token)
+                    
+                    if validation_result["success"]:
+                        user_info = validation_result["user_info"]
+                        # Set authentication and GitLab token for dashboard
+                        st.session_state.authenticated = True
+                        st.session_state.user_type = "admin"
+                        st.session_state.auth_user_info = user_info
+                        st.session_state.gitlab_token = admin_token
+                        st.session_state.token_validated = True
+                        st.session_state.user_info = user_info
+                        
+                        st.success(f"✅ Admin Authentication Successful! Welcome, {user_info.get('name', 'Administrator')}")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Token Validation Failed: {validation_result.get('error', 'Invalid token')}")
+            else:
+                st.error("❌ Authentication Failed - Invalid admin username or password.")
+        elif admin_login_submitted:
+            st.error("❌ Please fill in all fields (username, password, and access token).")
+    
+    # Welcome message
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); 
+                padding: 2rem; border-radius: 15px; margin-top: 2rem; text-align: center;">
+        <h3 style="color: #2c3e50; margin-bottom: 1rem;">🎉 Welcome to GitLab Analytics Dashboard</h3>
+        <p style="color: #34495e; font-size: 1.1em; margin-bottom: 0.5rem;">
+            Track your GitLab contributions and analyze project insights
+        </p>
+        <p style="color: #7f8c8d; font-size: 0.9em;">
+            Please authenticate above to access your personalized dashboard
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+# Initialize authentication session state
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+
+if 'user_type' not in st.session_state:
+    st.session_state.user_type = None
+
+if 'auth_user_info' not in st.session_state:
+    st.session_state.auth_user_info = None
+
+if 'show_user_management' not in st.session_state:
+    st.session_state.show_user_management = False
+
+# Authentication Check - Show authentication screen if not authenticated
+if not st.session_state.get('authenticated', False):
+    show_authentication_screen()
+    st.stop()  # Stop execution until authenticated
+
+# Add logout button in sidebar for authenticated users
+if st.session_state.get('authenticated', False):
+    with st.sidebar:
+        st.markdown("---")
+        user_type = st.session_state.get('user_type', 'unknown')
+        auth_user_info = st.session_state.get('auth_user_info', {})
+        
+        if user_type == "admin":
+            st.success(f"✅ Admin: {auth_user_info.get('name', 'Unknown')}")
+            st.info(f"Username: @{auth_user_info.get('username', 'Unknown')}")
+            
+            # Admin can change token
+            if st.button("🔄 Change Token"):
+                st.session_state.gitlab_token = ""
+                st.session_state.token_validated = False
+                st.session_state.user_info = None
+                st.cache_data.clear()
+                st.rerun()
+        else:
+            st.success(f"✅ User: {auth_user_info.get('username', 'Unknown')}")
+            st.info("🔒 Using assigned access token")
+        
+        if st.button("🔄 Logout", use_container_width=True):
+            # Clear all session state
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+
+# User Management Interface (Admin Only)
+if st.session_state.get('user_type') == 'admin':
+    st.sidebar.markdown("---")
+    if st.sidebar.button("👥 Manage Users", use_container_width=True):
+        st.session_state.show_user_management = True
+        st.rerun()
+
+# User Management Modal/Section
+if st.session_state.get('show_user_management', False) and st.session_state.get('user_type') == 'admin':
+    st.markdown("---")
+    st.markdown("## 👥 User Management")
+    
+    # Load current users
+    users = load_users()
+    
+    # Tabs for different management functions
+    tab1, tab2, tab3 = st.tabs(["📋 View Users", "➕ Add User", "✏️ Edit User"])
+    
+    with tab1:
+        st.markdown("### 📋 Current Users")
+        if users:
+            user_data = []
+            for username, user_info in users.items():
+                user_data.append({
+                    "Username": username,
+                    "Status": "🟢 Active" if user_info.get("is_active", True) else "🔴 Inactive",
+                    "Created": user_info.get("created_at", "Unknown")[:10],
+                    "Has Token": "✅ Yes" if user_info.get("access_token") else "❌ No"
+                })
+            
+            df = pd.DataFrame(user_data)
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.info("No users found.")
+    
+    with tab2:
+        st.markdown("### ➕ Add New User")
+        with st.form("add_user_form"):
+            new_username = st.text_input("Username", placeholder="Enter new username")
+            new_password = st.text_input("Password", type="password", placeholder="Enter password")
+            new_token = st.text_input("GitLab Access Token (Optional)", type="password", placeholder="glpat-xxxxxxxxxxxxxxxxxxxx")
+            
+            add_user_submitted = st.form_submit_button("➕ Add User")
+            
+            if add_user_submitted and new_username and new_password:
+                if new_username in users:
+                    st.error("❌ Username already exists!")
+                else:
+                    # Validate token if provided
+                    token_valid = True
+                    if new_token:
+                        with st.spinner("🔍 Validating GitLab token..."):
+                            validation_result = validate_gitlab_token(new_token)
+                            token_valid = validation_result["success"]
+                            if not token_valid:
+                                st.error(f"❌ Invalid GitLab token: {validation_result.get('error', 'Unknown error')}")
+                    
+                    if token_valid:
+                        users[new_username] = {
+                            "password_hash": hash_password(new_password),
+                            "access_token": new_token if new_token else "",
+                            "created_at": datetime.now().isoformat(),
+                            "is_active": True
+                        }
+                        
+                        if save_users(users):
+                            st.success(f"✅ User '{new_username}' added successfully!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to save user data.")
+            elif add_user_submitted:
+                st.error("❌ Please fill in username and password.")
+    
+    with tab3:
+        st.markdown("### ✏️ Edit User")
+        if users:
+            selected_user = st.selectbox("Select User to Edit", list(users.keys()))
+            
+            if selected_user:
+                user_info = users[selected_user]
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("#### Change Password")
+                    with st.form(f"change_password_{selected_user}"):
+                        new_password = st.text_input("New Password", type="password", placeholder="Enter new password")
+                        change_password_submitted = st.form_submit_button("🔑 Change Password")
+                        
+                        if change_password_submitted and new_password:
+                            users[selected_user]["password_hash"] = hash_password(new_password)
+                            if save_users(users):
+                                st.success(f"✅ Password changed for '{selected_user}'!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Failed to save changes.")
+                        elif change_password_submitted:
+                            st.error("❌ Please enter a new password.")
+                
+                with col2:
+                    st.markdown("#### Change Access Token")
+                    with st.form(f"change_token_{selected_user}"):
+                        new_token = st.text_input("New GitLab Access Token", type="password", 
+                                                placeholder="glpat-xxxxxxxxxxxxxxxxxxxx",
+                                                value="")
+                        change_token_submitted = st.form_submit_button("🔑 Change Token")
+                        
+                        if change_token_submitted:
+                            if new_token:
+                                with st.spinner("🔍 Validating GitLab token..."):
+                                    validation_result = validate_gitlab_token(new_token)
+                                    
+                                    if validation_result["success"]:
+                                        users[selected_user]["access_token"] = new_token
+                                        if save_users(users):
+                                            st.success(f"✅ Token updated for '{selected_user}'!")
+                                            st.rerun()
+                                        else:
+                                            st.error("❌ Failed to save changes.")
+                                    else:
+                                        st.error(f"❌ Invalid token: {validation_result.get('error', 'Unknown error')}")
+                            else:
+                                # Remove token
+                                users[selected_user]["access_token"] = ""
+                                if save_users(users):
+                                    st.success(f"✅ Token removed for '{selected_user}'!")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Failed to save changes.")
+                
+                # User status and deletion
+                st.markdown("#### User Actions")
+                col3, col4 = st.columns(2)
+                
+                with col3:
+                    current_status = user_info.get("is_active", True)
+                    if st.button(f"{'🔴 Deactivate' if current_status else '🟢 Activate'} User"):
+                        users[selected_user]["is_active"] = not current_status
+                        if save_users(users):
+                            status_text = "activated" if not current_status else "deactivated"
+                            st.success(f"✅ User '{selected_user}' {status_text}!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to save changes.")
+                
+                with col4:
+                    if st.button("🗑️ Delete User", type="secondary"):
+                        if selected_user != DEFAULT_USERNAME:  # Prevent deleting default user
+                            del users[selected_user]
+                            if save_users(users):
+                                st.success(f"✅ User '{selected_user}' deleted!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Failed to save changes.")
+                        else:
+                            st.error("❌ Cannot delete the default user!")
+        else:
+            st.info("No users available to edit.")
+    
+    # Close button
+    if st.button("❌ Close User Management"):
+        st.session_state.show_user_management = False
+        st.rerun()
 
 # Custom CSS for better styling
 st.markdown("""
@@ -145,65 +547,10 @@ if 'projects_cache' not in st.session_state:
 if 'members_cache' not in st.session_state:
     st.session_state.members_cache = None
 
-# Token Management Section
-st.markdown("---")
-if not st.session_state.get('token_validated', False):
-    st.markdown("## 🔐 GitLab Authentication Required")
-    st.info("Please enter your personal GitLab access token to access the dashboard.")
-    
-    with st.form("token_form"):
-        gitlab_token = st.text_input(
-            "GitLab Access Token", 
-            type="password", 
-            placeholder="glpat-xxxxxxxxxxxxxxxxxxxx",
-            help="Enter your GitLab personal access token with 'read_api' scope"
-        )
-        submitted = st.form_submit_button("🚀 Connect to GitLab")
-        
-        if submitted and gitlab_token:
-            # Validate the token
-            
-            with st.spinner("🔍 Validating GitLab token..."):
-                validation_result = validate_gitlab_token(gitlab_token)
-                
-            if validation_result["success"]:
-                st.session_state.gitlab_token = gitlab_token
-                st.session_state.token_validated = True
-                st.session_state.user_info = validation_result["user_info"]
-                st.success(f"✅ Successfully authenticated as: {validation_result['user_info']['name']}")
-                st.rerun()
-            else:
-                st.error(f"❌ Authentication failed: {validation_result['error']}")
-                st.info("Please check your token and ensure it has 'read_api' scope.")
-    
-    # Instructions for creating a token
-    with st.expander("ℹ️ How to create a GitLab Access Token"):
-        st.markdown(f"""
-        1. Go to [{GITLAB_URL}/-/profile/personal_access_tokens]({GITLAB_URL}/-/profile/personal_access_tokens)
-        2. Click "Add new token"
-        3. Enter a name for your token
-        4. Select expiration date
-        5. Check the **read_api** scope
-        6. Click "Create personal access token"
-        7. Copy the token and paste it above
-        """)
-    
-    st.stop()  # Stop execution until token is provided
-
-# Show authenticated user info in sidebar if token is validated
-if st.session_state.get('token_validated', False) and st.session_state.get('user_info'):
-    st.sidebar.success(f"✅ Authenticated as: {st.session_state.user_info['name']}")
-    st.sidebar.info(f"Username: @{st.session_state.user_info['username']}")
-    
-    if st.sidebar.button("🔄 Change Token"):
-        st.session_state.gitlab_token = ""
-        st.session_state.token_validated = False
-        st.session_state.user_info = None
-        st.cache_data.clear()
-        st.rerun()
-
-# Debug mode toggle
-debug_mode = st.sidebar.checkbox("🐛 Debug Mode", value=False, help="Show detailed debugging information")
+# Debug mode toggle (only for admins)
+debug_mode = False
+if st.session_state.get('user_type') == 'admin':
+    debug_mode = st.sidebar.checkbox("🐛 Debug Mode", value=False, help="Show detailed debugging information")
 
 # API Helper Functions
 def get_gitlab_headers():
@@ -663,8 +1010,8 @@ if group_input_method == "Single Group":
 else:
     group_ids_text = st.sidebar.text_area(
         "🏢 GitLab Group IDs",
-        value="72165",
-        placeholder="Enter group IDs, one per line:\n72165\n12345\n67890",
+        value="69994",
+        placeholder="Enter group IDs, one per line:\n69994\n12345\n67890",
         help="Enter multiple group IDs, one per line"
     )
     group_ids = [gid.strip() for gid in group_ids_text.split('\n') if gid.strip() and gid.strip().isdigit()]
@@ -700,7 +1047,7 @@ st.sidebar.markdown("---")
 # Filters
 st.sidebar.markdown("### 🔍 Filters")
 show_inactive = st.sidebar.checkbox("Show inactive users", value=True)
-activity_threshold = st.sidebar.slider("Minimum activity threshold", 0, 20, 1)
+activity_threshold = st.sidebar.slider("Minimum activity threshold", 0, 20, 0)
 show_detailed_activities = st.sidebar.checkbox("Show detailed activities", value=False)
 
 st.sidebar.markdown("---")
@@ -1044,7 +1391,7 @@ def main():
         st.markdown(f"""
     <div class="metric-card">
         <h3 style="color: #000000;">👥 Total Members</h3>
-        <h2 style="color: #667eea;">{total_members}</h2>
+        <h2 style="color: #667eea;">{len(user_stats)}</h2>
     </div>
     """, unsafe_allow_html=True)
     
