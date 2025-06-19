@@ -1391,7 +1391,7 @@ def main():
         st.markdown(f"""
     <div class="metric-card">
         <h3 style="color: #000000;">👥 Total Members</h3>
-        <h2 style="color: #667eea;">{len(user_stats)}</h2>
+        <h2 style="color: #667eea;">{len(members_result['data'])}</h2>
     </div>
     """, unsafe_allow_html=True)
     
