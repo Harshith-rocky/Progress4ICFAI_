@@ -129,31 +129,23 @@ def show_authentication_screen():
     
     with tab1:
         st.markdown("### 👤 User Authentication")
-        st.info("Login with your assigned username, password, and access token for standard dashboard access.")
+        st.info("Login with your assigned username and password for standard dashboard access.")
         
         with st.form("user_login_form"):
             username = st.text_input("Username", placeholder="Enter your username")
             password = st.text_input("Password", type="password", placeholder="Enter your password")
-            user_token = st.text_input(
-                "GitLab Access Token",
-                type="password",
-                placeholder="glpat-xxxxxxxxxxxxxxxxxxxx",
-                help="Enter your assigned GitLab access token"
-            )
-            
             user_login_submitted = st.form_submit_button("🚀 Login as Faculty", use_container_width=True)
         
-        if user_login_submitted and username and password and user_token:
+        if user_login_submitted and username and password:
             if validate_user_credentials_dynamic(username, password):
-                with st.spinner("🔍 Validating your access token..."):
+                users = load_users()
+                user_token = users[username].get("access_token", "")
+                if not user_token:
+                    st.error("❌ No GitLab token assigned to this user. Please contact admin.")
+                else:
+                    # Validate token (optional, can skip for speed)
                     validation_result = validate_gitlab_token(user_token)
-                    
                     if validation_result["success"]:
-                        # Save the token for this user
-                        users = load_users()
-                        users[username]["access_token"] = user_token
-                        save_users(users)
-                        
                         st.session_state.authenticated = True
                         st.session_state.user_type = "user"
                         st.session_state.auth_user_info = {"username": username, "access_level": "user"}
@@ -166,7 +158,7 @@ def show_authentication_screen():
             else:
                 st.error("❌ Authentication Failed - Invalid username or password.")
         elif user_login_submitted:
-            st.error("❌ Please fill in all fields (username, password, and access token).")
+            st.error("❌ Please fill in all fields (username and password).")
     
     with tab2:
         st.markdown("### 🔐 Administrator Authentication")
@@ -206,7 +198,7 @@ def show_authentication_screen():
             else:
                 st.error("❌ Authentication Failed - Invalid admin username or password.")
         elif admin_login_submitted:
-            st.error("❌ Please fill in all fields (username, password, and access token).")
+            st.error("❌ Please fill in all fields (admin username, password, and access token).")
     
     # Welcome message
     st.markdown("""
@@ -759,7 +751,7 @@ def get_all_accessible_projects():
         projects.extend(response)
         
         if debug_mode:
-            st.write(f"📄 Projects page {page}: Found {len(response)} projects")
+            st.write(f"📄 Projects page {page}: Found {len(response)}) projects")
         
         if len(response) < per_page:
             break
@@ -1204,7 +1196,6 @@ def main():
                     "Last Activity": st.column_config.TextColumn("Last Activity", width="medium"),
                     "Stars": st.column_config.NumberColumn("⭐ Stars", width="small"),
                     "Forks": st.column_config.NumberColumn("🍴 Forks", width="small"),
-                    "README": st.column_config.TextColumn("📝 README", width="small"),
                     "Web URL": st.column_config.LinkColumn("🔗 URL", width="medium")
                 }
             )
@@ -1469,49 +1460,50 @@ def main():
     
     # Create user activity table
     st.markdown("## 👤 Individual User Analysis")
-    
+
+    # Load college details CSV and create a mapping for Gitlab Profile -> Enrollment Number, Faculty Mentor
+    try:
+        college_df = pd.read_csv("Collegedetails.csv")
+        # Normalize Gitlab Profile for matching (strip, lower)
+        college_df["Gitlab Profile"] = college_df["Gitlab Profile"].astype(str).str.strip().str.lower()
+        profile_to_enrollment = dict(zip(college_df["Gitlab Profile"], college_df["Enrollment Number"]))
+        profile_to_mentor = dict(zip(college_df["Gitlab Profile"], college_df["Faculty Mentor"]))
+    except Exception as e:
+        profile_to_enrollment = {}
+        profile_to_mentor = {}
+        st.warning(f"Could not load Collegedetails.csv: {e}")
+
     user_data = []
-    for user, stats in filtered_users.items():
+    for idx, (user, stats) in enumerate(filtered_users.items(), 1):
         total_activity = stats["commits"] + stats["merge_requests"] + stats["issues"]
         last_activity_str = "Never"
         days_since_activity = "N/A"
-        
+        # Use the username (Gitlab Profile) for matching
+        gitlab_profile = str(stats["username"]).strip().lower()
+        enrollment_number = profile_to_enrollment.get(gitlab_profile, "-")
+        faculty_mentor = profile_to_mentor.get(gitlab_profile, "-")
+        # Convert to IST and format last activity
         if stats["last_activity"]:
-    # Convert to IST and format
             utc_dt = stats["last_activity"]
             if utc_dt.tzinfo is None:
-                utc_dt = utc_dt.replace(tzinfo=pytz.UTC)
+                utc_dt = LOCAL_TIMEZONE.localize(utc_dt)
             ist_dt = utc_dt.astimezone(LOCAL_TIMEZONE)
             last_activity_str = ist_dt.strftime("%Y-%m-%d %H:%M IST")
-    
-    # Calculate days since with proper timezone
-            now_ist = datetime.now(LOCAL_TIMEZONE)
-            days_since = (now_ist.date() - ist_dt.date()).days
-            if days_since == 0:
-                days_since_activity = "0 days ago"
-            elif days_since == 1:
-                days_since_activity = "1 day ago"
-            else:
-                days_since_activity = f"{days_since} days ago"
-        else:
-            last_activity_str = "Never"
-            days_since_activity = "N/A"
-        
-        if activity_threshold > 0 :
-            status = "🟢 Active" if total_activity >= activity_threshold else "🔴 Inactive"
-        else: 
-            status = "🟢 Active" if total_activity > activity_threshold else "🔴 Inactive"
-        
+            days_since_activity = (datetime.now(LOCAL_TIMEZONE) - ist_dt).days
+        # Status logic (unchanged)
+        status = "🟢 Active" if total_activity > 0 else "🔴 Inactive"
         user_data.append({
+            "S.no": idx,  # Serial number column added as first column
+            "Enrollment number": enrollment_number,
             "Name": stats["name"],
             "Username": stats["username"],
+            "Faculty mentor": faculty_mentor,
             "Status": status,
             "Commits": stats["commits"],
             "Merge Requests": stats["merge_requests"],
             "Issues": stats["issues"],
             "Total Activity": total_activity,
             "Projects": len(stats["projects"]),
-            # "Last Activity": last_activity_str,
             "Days Since Activity": days_since_activity
         })
     
@@ -1556,18 +1548,38 @@ def main():
     if user_data:
         users_df = pd.DataFrame(user_data)
         
+        # Faculty mentor filter
+        faculty_list = users_df["Faculty mentor"].dropna().unique().tolist()
+        faculty_list = [f for f in faculty_list if f != "-"]
+        faculty_list.sort()
+        faculty_list.insert(0, "All")
+        selected_faculty = st.selectbox("Filter by Faculty Mentor", faculty_list, index=0)
+        
+        if selected_faculty != "All":
+            users_df = users_df[users_df["Faculty mentor"] == selected_faculty].copy()
+        
+        # Reset serial numbers after filtering
+        users_df = users_df.reset_index(drop=True)
+        users_df["S.no"] = users_df.index + 1
+        
+        # Ensure S.no is the first column
+        cols = users_df.columns.tolist()
+        if "S.no" in cols:
+            cols.insert(0, cols.pop(cols.index("S.no")))
+            users_df = users_df[cols]
+        
         # Create a new column with clickable links while keeping original username
         users_df["Username"] = users_df["Username"].apply(
-        lambda x: f"{GITLAB_URL}/{x}"
-    )
+            lambda x: f"{GITLAB_URL}/{x}"
+        )
     
-
         # Display table with enhanced formatting
         st.dataframe(
             users_df,
             use_container_width=True,
             hide_index=True,
             column_config={
+                "S.no": st.column_config.NumberColumn("S.no", width="small"),
                 "Name": st.column_config.TextColumn("👤 Name", width="medium"),
                  "Username": st.column_config.LinkColumn(
                 "🌐 GitLab Profile", 
@@ -1581,7 +1593,9 @@ def main():
                 "Total Activity": st.column_config.NumberColumn("⚡ Total", width="small"),
                 "Projects": st.column_config.NumberColumn("🗂️ Projects", width="small"),
                 # "Last Activity": st.column_config.TextColumn("🕒 Last Activity", width="medium"),
-                "Days Since Activity": st.column_config.TextColumn("📅 Days Ago", width="medium")
+                "Days Since Activity": st.column_config.TextColumn("📅 Days Ago", width="medium"),
+                "Faculty mentor": st.column_config.TextColumn("Faculty Mentor", width="medium"),
+                "Enrollment number": st.column_config.TextColumn("Enrollment Number", width="medium")
             },
         )
         
