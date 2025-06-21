@@ -73,11 +73,21 @@ def load_users():
     }
 
 def save_users(users):
-    """Save users to JSON file"""
+    """Save users to JSON file (convert tokens to dummy values for repo safety)"""
     users_file = "users.json"
+    # If pushing to repo, replace all access tokens with a placeholder
+    if os.environ.get("GITHUB_ACTIONS") or os.environ.get("CI") or os.environ.get("EXPORT_USERS_DUMMY", "0") == "1":
+        users_to_save = {}
+        for username, user in users.items():
+            user_copy = user.copy()
+            if user_copy.get("access_token"):
+                user_copy["access_token"] = "DUMMY_TOKEN"
+            users_to_save[username] = user_copy
+    else:
+        users_to_save = users
     try:
         with open(users_file, 'w') as f:
-            json.dump(users, f, indent=2)
+            json.dump(users_to_save, f, indent=2)
         return True
     except Exception as e:
         st.error(f"Error saving users: {e}")
@@ -138,23 +148,12 @@ def show_authentication_screen():
         
         if user_login_submitted and username and password:
             if validate_user_credentials_dynamic(username, password):
-                users = load_users()
-                user_token = users[username].get("access_token", "")
-                if not user_token:
-                    st.error("❌ No GitLab token assigned to this user. Please contact admin.")
-                else:
-                    # Validate token (optional, can skip for speed)
-                    validation_result = validate_gitlab_token(user_token)
-                    if validation_result["success"]:
-                        st.session_state.authenticated = True
-                        st.session_state.user_type = "user"
-                        st.session_state.auth_user_info = {"username": username, "access_level": "user"}
-                        st.session_state.gitlab_token = user_token  # Set user's token
-                        st.session_state.token_validated = True
-                        st.success("✅ User Authentication Successful! Loading dashboard...")
-                        st.rerun()
-                    else:
-                        st.error(f"❌ Token Validation Failed: {validation_result.get('error', 'Invalid token')}")
+                st.session_state.authenticated = True
+                st.session_state.user_type = "user"
+                st.session_state.auth_user_info = {"username": username, "access_level": "user"}
+                st.session_state.token_validated = True
+                st.success("✅ User Authentication Successful! Loading dashboard...")
+                st.rerun()
             else:
                 st.error("❌ Authentication Failed - Invalid username or password.")
         elif user_login_submitted:
@@ -198,7 +197,7 @@ def show_authentication_screen():
             else:
                 st.error("❌ Authentication Failed - Invalid admin username or password.")
         elif admin_login_submitted:
-            st.error("❌ Please fill in all fields (admin username, password, and access token).")
+            st.error("❌ Please fill in all fields (username, password, and access token).")
     
     # Welcome message
     st.markdown("""
@@ -1831,3 +1830,12 @@ def main():
 # Run the main application
 if __name__ == "__main__":
     main()
+
+# Utility to export a safe users.json for repo
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "export_safe_users":
+        users = load_users()
+        os.environ["EXPORT_USERS_DUMMY"] = "1"
+        save_users(users)
+        print("users.json exported with dummy tokens.")
