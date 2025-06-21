@@ -18,7 +18,7 @@ import hashlib
 from utils.validate_gitlab_token import validate_gitlab_token
 
 # Timezone configuration for IST
-LOCAL_TIMEZONE = pytz.timezone('Asia/Kolkata')  # IST - Indian Standard Time
+LOCAL_TIMEZONE = pytz.timezone('Asia/Kolkata')  # IST 
 
 # Configuration
 GITLAB_URL = "https://code.swecha.org"
