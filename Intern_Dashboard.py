@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
+import plotly.graph_objects as goglpat-Rp4rDLSYjS1NZvLrtPFJ
 from plotly.subplots import make_subplots
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1816,7 +1816,7 @@ def main():
             )
             st.plotly_chart(fig_timeline, use_container_width=True)
     
-    # Summary insights..
+    # Summary insights
     st.markdown("## 💡 Key Insights")
     
     insights = []
