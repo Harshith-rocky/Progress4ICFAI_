@@ -1816,7 +1816,7 @@ def main():
             )
             st.plotly_chart(fig_timeline, use_container_width=True)
     
-    # Summary insights
+    # Summary insights..
     st.markdown("## 💡 Key Insights")
     
     insights = []
