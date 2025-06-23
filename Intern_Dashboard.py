@@ -19,7 +19,6 @@ from utils.validate_gitlab_token import validate_gitlab_token
 
 # Timezone configuration for IST
 LOCAL_TIMEZONE = pytz.timezone('Asia/Kolkata')  # IST 
-
 # Configuration
 GITLAB_URL = "https://code.swecha.org"
 
@@ -134,38 +133,52 @@ def show_authentication_screen():
     </div>
     """, unsafe_allow_html=True)
     
-    # Authentication tabs
-    tab1, tab2 = st.tabs(["👤 Faculty Login", "🔐 Admin Login"])
+    # Initialize session state for login flow
+    if 'login_step' not in st.session_state:
+        st.session_state.login_step = 'credentials'
+    if 'temp_user_type' not in st.session_state:
+        st.session_state.temp_user_type = None
+    if 'temp_username' not in st.session_state:
+        st.session_state.temp_username = None
     
-    with tab1:
-        st.markdown("### 👤 User Authentication")
-        st.info("Login with your assigned username and password for standard dashboard access.")
+    # Step 1: Username and Password
+    if st.session_state.login_step == 'credentials':
+        st.markdown("###  Login")
+        st.info("Enter your username and password to continue.")
         
-        with st.form("user_login_form"):
+        with st.form("login_form"):
             username = st.text_input("Username", placeholder="Enter your username")
             password = st.text_input("Password", type="password", placeholder="Enter your password")
-            user_login_submitted = st.form_submit_button("🚀 Login as Faculty", use_container_width=True)
+            login_submitted = st.form_submit_button("🚀 Login", use_container_width=True)
         
-        if user_login_submitted and username and password:
-            if validate_user_credentials_dynamic(username, password):
+        if login_submitted and username and password:
+            # Check admin credentials first
+            if validate_admin_credentials(username, password):
+                st.session_state.login_step = 'admin_token'
+                st.session_state.temp_user_type = 'admin'
+                st.session_state.temp_username = username
+                st.success("✅ Admin credentials verified! Please enter your GitLab token.")
+                st.rerun()
+            # Check faculty credentials
+            elif validate_user_credentials_dynamic(username, password):
+                # Faculty login - complete authentication
                 st.session_state.authenticated = True
                 st.session_state.user_type = "user"
                 st.session_state.auth_user_info = {"username": username, "access_level": "user"}
                 st.session_state.token_validated = True
-                st.success("✅ User Authentication Successful! Loading dashboard...")
+                st.success("✅ Faculty Authentication Successful! Loading dashboard...")
                 st.rerun()
             else:
                 st.error("❌ Authentication Failed - Invalid username or password.")
-        elif user_login_submitted:
+        elif login_submitted:
             st.error("❌ Please fill in all fields (username and password).")
     
-    with tab2:
-        st.markdown("### 🔐 Administrator Authentication")
-        st.info("Login with your admin credentials and GitLab access token for full administrative access.")
+    # Step 2: Admin Token Input
+    elif st.session_state.login_step == 'admin_token':
+        st.markdown("### 🔐 Admin Token Required")
+        st.info("Please enter your GitLab access token to complete admin authentication.")
         
-        with st.form("admin_login_form"):
-            admin_username = st.text_input("Admin Username", placeholder="Enter admin username")
-            admin_password = st.text_input("Admin Password", type="password", placeholder="Enter admin password")
+        with st.form("admin_token_form"):
             admin_token = st.text_input(
                 "GitLab Access Token",
                 type="password",
@@ -173,31 +186,44 @@ def show_authentication_screen():
                 help="Enter your GitLab personal access token"
             )
             
-            admin_login_submitted = st.form_submit_button("🔓 Login as Admin", use_container_width=True)
+            col1, col2 = st.columns(2)
+            with col1:
+                token_submitted = st.form_submit_button("🔓 Complete Login", use_container_width=True)
+            with col2:
+                back_button = st.form_submit_button("⬅️ Back", use_container_width=True)
         
-        if admin_login_submitted and admin_username and admin_password and admin_token:
-            if validate_admin_credentials(admin_username, admin_password):
-                with st.spinner("🔍 Validating GitLab token..."):
-                    validation_result = validate_gitlab_token(admin_token)
+        if back_button:
+            # Reset to credentials step
+            st.session_state.login_step = 'credentials'
+            st.session_state.temp_user_type = None
+            st.session_state.temp_username = None
+            st.rerun()
+        
+        if token_submitted and admin_token:
+            with st.spinner("🔍 Validating GitLab token..."):
+                validation_result = validate_gitlab_token(admin_token)
+                
+                if validation_result["success"]:
+                    user_info = validation_result["user_info"]
+                    # Set authentication and GitLab token for dashboard
+                    st.session_state.authenticated = True
+                    st.session_state.user_type = "admin"
+                    st.session_state.auth_user_info = user_info
+                    st.session_state.gitlab_token = admin_token
+                    st.session_state.token_validated = True
+                    st.session_state.user_info = user_info
                     
-                    if validation_result["success"]:
-                        user_info = validation_result["user_info"]
-                        # Set authentication and GitLab token for dashboard
-                        st.session_state.authenticated = True
-                        st.session_state.user_type = "admin"
-                        st.session_state.auth_user_info = user_info
-                        st.session_state.gitlab_token = admin_token
-                        st.session_state.token_validated = True
-                        st.session_state.user_info = user_info
-                        
-                        st.success(f"✅ Admin Authentication Successful! Welcome, {user_info.get('name', 'Administrator')}")
-                        st.rerun()
-                    else:
-                        st.error(f"❌ Token Validation Failed: {validation_result.get('error', 'Invalid token')}")
-            else:
-                st.error("❌ Authentication Failed - Invalid admin username or password.")
-        elif admin_login_submitted:
-            st.error("❌ Please fill in all fields (username, password, and access token).")
+                    # Clear temporary session state
+                    st.session_state.login_step = 'credentials'
+                    st.session_state.temp_user_type = None
+                    st.session_state.temp_username = None
+                    
+                    st.success(f"✅ Admin Authentication Successful! Welcome, {user_info.get('name', 'Administrator')}")
+                    st.rerun()
+                else:
+                    st.error(f"❌ Token Validation Failed: {validation_result.get('error', 'Invalid token')}")
+        elif token_submitted:
+            st.error("❌ Please enter your GitLab access token.")
     
     # Welcome message
     st.markdown("""
@@ -1102,7 +1128,6 @@ def main():
             members_result = get_group_members(gid)
             if members_result["success"]:
                 all_members.extend(members_result["data"])
-                st.success(f"✅ Found {len(members_result['data'])} members in group {gid}")
             else:
                 st.error(f"❌ Failed to load group {gid}: {members_result['error']}")
 
@@ -1132,7 +1157,6 @@ def main():
                 return
         else:
             projects = projects_result["data"]
-            st.success(f"📁 Found {len(projects)} accessible projects")
     
     # Show project list if requested
     if show_project_list and projects:
