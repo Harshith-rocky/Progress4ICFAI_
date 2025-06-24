@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as goglpat-Rp4rDLSYjS1NZvLrtPFJ
+import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
